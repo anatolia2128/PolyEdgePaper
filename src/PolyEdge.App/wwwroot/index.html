@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PolyEdge Paper</title>
+<style>
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#16202a; --mute:#5b6b7a; --line:#d9e0e6;
+  --gain:#0f766e; --loss:#b42318; --accent:#27476e; --warn:#9a6700;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#10161c; --panel:#18212a; --ink:#e6edf3; --mute:#8b9bab; --line:#26323d; --gain:#3fb8a8; --loss:#f0776c; --accent:#8fb4e3; --warn:#d4a72c; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.num{font-variant-numeric:tabular-nums;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+main{max-width:1180px;margin:0 auto;padding:20px 18px 40px}
+header{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between;margin-bottom:18px}
+h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+.tag{border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:12.5px;color:var(--mute);margin-left:8px}
+.health{display:flex;gap:16px;font-size:13px;color:var(--mute)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mute)}
+.ok{background:var(--gain)} .bad{background:var(--loss)} .mid{background:var(--warn)}
+.hero{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h2{font-size:13px;font-weight:600;color:var(--mute);margin:0 0 8px}
+.big{font-size:34px;font-weight:650;line-height:1.1}
+.sub{color:var(--mute);font-size:13px;margin-top:4px}
+.gain{color:var(--gain)} .loss{color:var(--loss)}
+.cols{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;margin-bottom:12px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:5px 14px;font-size:14px}
+.kv span:nth-child(odd){color:var(--mute)}
+.kv span:nth-child(even){text-align:right}
+.bar{position:relative;height:8px;background:var(--line);border-radius:4px;margin:6px 0 12px;overflow:hidden}
+.bar>i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:4px}
+.flow{position:relative;height:8px;background:var(--line);border-radius:4px;margin:6px 0 4px}
+.flow>i{position:absolute;top:0;bottom:0;border-radius:4px}
+.flow:after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--mute)}
+.status{margin-top:12px;padding:9px 11px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{color:var(--mute);font-weight:600;font-size:12.5px}
+.scroll{overflow-x:auto}
+@media (max-width:860px){.hero{grid-template-columns:1fr 1fr}.cols{grid-template-columns:1fr}}
+.note{color:var(--mute);font-size:12.5px;margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div><h1 style="display:inline">PolyEdge Paper</h1><span class="tag" id="mode">…</span><span class="tag">gerçek emir yok</span></div>
+  <div class="health">
+    <span><i class="dot" id="hB"></i>Binance <span class="num" id="aB">-</span></span>
+    <span><i class="dot" id="hC"></i>Chainlink <span class="num" id="aC">-</span></span>
+    <span><i class="dot" id="hK"></i>Order book <span class="num" id="aK">-</span></span>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="card"><h2>Toplam varlık (equity)</h2><div class="big num" id="equity">-</div><div class="sub">Başlangıç <span class="num" id="start">-</span> · Nakit <span class="num" id="cash">-</span></div></div>
+  <div class="card"><h2>Net PnL</h2><div class="big num" id="pnl">-</div><div class="sub">ROI <span class="num" id="roi">-</span></div></div>
+  <div class="card"><h2>İşlemler</h2><div class="big num" id="trades">-</div><div class="sub">Kazanma <span class="num" id="wr">-</span> · Açık <span class="num" id="open">-</span></div></div>
+  <div class="card"><h2>Maks. düşüş</h2><div class="big num" id="dd">-</div><div class="sub">Profit factor <span class="num" id="pf">-</span></div></div>
+</section>
+
+<section class="cols">
+  <div class="card">
+    <h2>Canlı pencere <span class="num" id="slug" style="font-weight:400"></span></h2>
+    <div class="sub num"><span id="elapsed">-</span> / <span id="left">-</span> kaldı</div>
+    <div class="bar"><i id="prog" style="width:0"></i></div>
+    <div class="kv">
+      <span>Binance (son işlem)</span><span class="num" id="bin">-</span>
+      <span>Chainlink (çözüm kaynağı)</span><span class="num" id="cl">-</span>
+      <span>Açılışa göre hareket</span><span class="num" id="rel">-</span>
+      <span>Oynaklık (σ/√sn)</span><span class="num" id="sig">-</span>
+    </div>
+    <div style="margin-top:12px;font-size:14px"><span style="color:var(--mute)">Akış skoru</span> <span class="num" id="fs" style="float:right">-</span></div>
+    <div class="flow"><i id="flowbar"></i></div>
+    <div class="kv" style="margin-top:8px">
+      <span>Balina net (30 sn)</span><span class="num" id="wh">-</span>
+      <span>CVD oranı (15 sn)</span><span class="num" id="cvd">-</span>
+      <span>Defter dengesizliği</span><span class="num" id="dep">-</span>
+      <span>Likidasyon net (30 sn)</span><span class="num" id="liq">-</span>
+    </div>
+    <div class="status" id="status">-</div>
+  </div>
+
+  <div class="card">
+    <h2>Olasılık ve fiyat</h2>
+    <div class="kv">
+      <span>Model P(Up)</span><span class="num" id="pm">-</span>
+      <span>Piyasa P(Up)</span><span class="num" id="pk">-</span>
+      <span>Final P(Up)</span><span class="num" id="pf2">-</span>
+      <span>Up  bid / ask</span><span class="num" id="up">-</span>
+      <span>Down bid / ask</span><span class="num" id="dn">-</span>
+      <span>Net edge Up</span><span class="num" id="eu">-</span>
+      <span>Net edge Down</span><span class="num" id="ed">-</span>
+    </div>
+    <h2 style="margin-top:18px">Maliyetler (toplam)</h2>
+    <div class="kv">
+      <span>Taker fee</span><span class="num" id="fee">-</span>
+      <span>Slippage (derinlik + gecikme)</span><span class="num" id="slip">-</span>
+      <span>Gas</span><span class="num" id="gas">-</span>
+      <span>Ort. işlem ROI</span><span class="num" id="atr">-</span>
+      <span>Brier skoru (düşük iyi, 0.25 = yazı-tura)</span><span class="num" id="brier">-</span>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="margin-bottom:12px">
+  <h2>Açık pozisyonlar</h2>
+  <div class="scroll"><table><thead><tr><th>#</th><th>Market</th><th>Yön</th><th>Pay</th><th>Ort. fiyat</th><th>Maliyet</th><th>Fee</th><th>P</th><th>Edge</th></tr></thead><tbody id="openT"></tbody></table></div>
+</section>
+<section class="card">
+  <h2>Son kapanan işlemler</h2>
+  <div class="scroll"><table><thead><tr><th>#</th><th>Market</th><th>Yön</th><th>Pay</th><th>Ort. fiyat</th><th>Slippage</th><th>Fee</th><th>Sonuç</th><th>PnL</th><th>ROI</th><th>Kaynak</th></tr></thead><tbody id="recentT"></tbody></table></div>
+</section>
+<p class="note">Bu bir paper trading simülasyonudur. Slippage gerçek order book'tan, fee Polymarket formülünden hesaplanır; yine de gerçek dolum, kuyruk ve gecikme koşullarının tamamını yansıtmaz.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const usd=(v,d=2)=>v==null?'-':(v<0?'-':'')+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sg=v=>v==null?'-':(v>=0?'+':'-')+'$'+Math.abs(v).toFixed(2);
+const pc=(v,d=1)=>v==null?'-':(v*100).toFixed(d)+'%';
+const px=v=>v==null?'-':Number(v).toFixed(3);
+const cls=(el,v)=>{el.classList.remove('gain','loss'); if(v>0)el.classList.add('gain'); else if(v<0)el.classList.add('loss');};
+const dot=(id,age,warn,bad)=>{const e=$(id);e.className='dot '+(age==null?'bad':age>bad?'bad':age>warn?'mid':'ok');};
+const short=s=>s&&s.length>22?'…'+s.slice(-14):s;
+
+async function tick(){
+  let j; try{ j=await (await fetch('/api/state')).json(); }catch(e){ $('status').textContent='Sunucuya ulaşılamıyor.'; return; }
+  const s=j.stats, l=j.live, h=j.health;
+  $('equity').textContent=usd(s.equity); $('start').textContent=usd(s.startingBalance,0); $('cash').textContent=usd(s.cash);
+  $('pnl').textContent=sg(s.netPnl); cls($('pnl'),s.netPnl);
+  $('roi').textContent=(s.roiPct>=0?'+':'')+s.roiPct.toFixed(2)+'%'; cls($('roi'),s.roiPct);
+  $('trades').textContent=s.totalTrades; $('wr').textContent=s.wins+s.losses>0?s.winRatePct.toFixed(0)+'%':'-'; $('open').textContent=s.openTrades;
+  $('dd').textContent=usd(s.maxDrawdownUsd); $('pf').textContent=s.profitFactor>=999?'∞':s.profitFactor.toFixed(2);
+  $('fee').textContent=usd(s.feesPaid,4); $('slip').textContent=usd(s.slippagePaid,4); $('gas').textContent=usd(s.gasPaid,4);
+  $('atr').textContent=s.wins+s.losses>0?s.avgTradeRoiPct.toFixed(2)+'%':'-'; $('brier').textContent=s.wins+s.losses>0?s.brierScore.toFixed(3):'-';
+
+  dot('hB',h.binanceAgeSec,3,8); dot('hC',h.chainlinkAgeSec,5,15); dot('hK',h.bookAgeSec,3,8);
+  $('aB').textContent=h.binanceAgeSec==null?'yok':h.binanceAgeSec+'s'; $('aC').textContent=h.chainlinkAgeSec==null?'yok':h.chainlinkAgeSec+'s'; $('aK').textContent=h.bookAgeSec==null?'yok':h.bookAgeSec+'s';
+
+  if(l){
+    $('mode').textContent=l.mode; $('slug').textContent=short(l.slug)||'';
+    const total=(l.elapsedSec||0)+(l.secondsLeft||0);
+    $('elapsed').textContent=(l.elapsedSec||0).toFixed(0)+'s'; $('left').textContent=(l.secondsLeft||0).toFixed(0)+'s';
+    $('prog').style.width=total>0?Math.min(100,(l.elapsedSec/total)*100)+'%':'0';
+    $('bin').textContent=l.binancePrice==null?'-':usd(l.binancePrice); $('cl').textContent=l.chainlinkPrice==null?'-':usd(l.chainlinkPrice);
+    $('rel').textContent=l.relMovePct==null?'-':(l.relMovePct>=0?'+':'')+l.relMovePct.toFixed(4)+'%'; if(l.relMovePct!=null)cls($('rel'),l.relMovePct);
+    $('sig').textContent=l.sigmaPerSqrtSec==null?'-':l.sigmaPerSqrtSec.toExponential(2);
+    const f=l.flow;
+    if(f){
+      $('fs').textContent=(f.score>=0?'+':'')+f.score.toFixed(2);
+      const b=$('flowbar'); const w=Math.abs(f.score)*50; b.style.width=w+'%'; b.style.left=f.score>=0?'50%':(50-w)+'%'; b.style.background=f.score>=0?'var(--gain)':'var(--loss)';
+      $('wh').textContent=sg(f.whale30sNet/1000).replace('$','$')+'k ('+f.whaleCount30s+' işlem)'; $('cvd').textContent=(f.cvdRatio15s*100).toFixed(0)+'%';
+      $('dep').textContent=(f.depthImbalance*100).toFixed(0)+'%'; $('liq').textContent=sg(f.liqNet30s/1000)+'k';
+    }
+    $('pm').textContent=pc(l.pModel); $('pk').textContent=pc(l.pMarket); $('pf2').textContent=pc(l.pFinal);
+    $('up').textContent=px(l.upBid)+' / '+px(l.upAsk); $('dn').textContent=px(l.downBid)+' / '+px(l.downAsk);
+    $('eu').textContent=pc(l.edgeUp); $('ed').textContent=pc(l.edgeDown);
+    if(l.edgeUp!=null)cls($('eu'),l.edgeUp); if(l.edgeDown!=null)cls($('ed'),l.edgeDown);
+    $('status').textContent=l.status;
+  }
+
+  $('openT').innerHTML=j.open.length?j.open.map(t=>`<tr><td>${t.id}</td><td>${short(t.slug)}</td><td>${t.side}</td><td class="num">${t.shares}</td><td class="num">${t.avgPrice.toFixed(3)}</td><td class="num">${usd(t.cost)}</td><td class="num">${usd(t.fee,4)}</td><td class="num">${pc(t.finalProb)}</td><td class="num">${pc(t.edgeAtDecision)}</td></tr>`).join(''):'<tr><td colspan="9" style="text-align:left;color:var(--mute)">Açık pozisyon yok.</td></tr>';
+  $('recentT').innerHTML=j.recent.length?j.recent.map(t=>`<tr><td>${t.id}</td><td>${short(t.slug)}</td><td>${t.side}</td><td class="num">${t.shares}</td><td class="num">${t.avgPrice.toFixed(3)}</td><td class="num">${usd(t.slippageUsd,4)}</td><td class="num">${usd(t.fee,4)}</td><td>${t.won?'Kazandı':'Kaybetti'}</td><td class="num ${t.pnl>=0?'gain':'loss'}">${sg(t.pnl)}</td><td class="num ${t.roi>=0?'gain':'loss'}">${(t.roi*100).toFixed(1)}%</td><td>${t.settleSource}</td></tr>`).join(''):'<tr><td colspan="11" style="text-align:left;color:var(--mute)">Henüz kapanan işlem yok.</td></tr>';
+}
+tick(); setInterval(tick,1000);
+</script>
+</body>
+</html>

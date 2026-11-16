@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "PolyEdge.App (Live paper)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+    },
+    "PolyEdge.App (Simulated offline)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development", "Bot__Mode": "Simulated" }
+    }
+  }
+}
