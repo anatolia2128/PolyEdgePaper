@@ -71,7 +71,7 @@ public sealed class StateStore
 
     public void AppendWindow(string line)
     {
-        const string header = "slug,start_utc,end_utc,chainlink_open,chainlink_close,chainlink_move_bp,chainlink_winner,official_winner,resolution_source,binance_open,bot_skipped,trades";
+        const string header = "slug,start_utc,end_utc,chainlink_open,chainlink_close,chainlink_move_bp,chainlink_winner,official_winner,resolution_source,binance_open,bot_skipped,trades,resolved_after_s";
         Append(WindowsCsv, header, line);
     }
 

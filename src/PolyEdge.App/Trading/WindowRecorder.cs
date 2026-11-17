@@ -54,7 +54,7 @@ public sealed class WindowRecorderService : BackgroundService
                     var res = await _api.GetResolutionAsync(w.Slug, w.ConditionId, since, ct);
                     if (res.Winner is null && since < GiveUpAfterSeconds) continue;
 
-                    Write(w, res);
+                    Write(w, res, since);
                     _pending.Remove(w);
                 }
             }
@@ -65,7 +65,7 @@ public sealed class WindowRecorderService : BackgroundService
         }
     }
 
-    private void Write(FinishedWindow w, Resolution res)
+    private void Write(FinishedWindow w, Resolution res, double sinceEndSec)
     {
         var start = DateTimeOffset.FromUnixTimeSeconds(w.StartUnix);
         var end = DateTimeOffset.FromUnixTimeSeconds(w.EndUnix);
@@ -85,6 +85,7 @@ public sealed class WindowRecorderService : BackgroundService
             o?.ToString(CultureInfo.InvariantCulture) ?? "", c?.ToString(CultureInfo.InvariantCulture) ?? "",
             moveBp, clWinner,
             res.Winner?.ToString() ?? "", string.IsNullOrEmpty(res.Source) ? "none" : res.Source,
-            w.OpenBinance?.ToString(CultureInfo.InvariantCulture) ?? "", w.Skipped, trades));
+            w.OpenBinance?.ToString(CultureInfo.InvariantCulture) ?? "", w.Skipped, trades,
+            res.Winner is null ? "" : sinceEndSec.ToString("0", CultureInfo.InvariantCulture)));
     }
 }

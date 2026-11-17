@@ -48,6 +48,26 @@ def boot_ci(v, n=3000):
     return np.percentile(m, 5), np.percentile(m, 95)
 
 
+def correct_trades(t, w):
+    """windows.csv'de resmi sonuç varsa, chainlink-fallback ile kapanmış işlemlerin sonucunu/PnL'ini resmi sonuca göre düzeltir."""
+    if w is None or "official_winner" not in w:
+        return t, 0
+    off = w[w["official_winner"].isin(["Up", "Down"])].set_index("slug")["official_winner"]
+    t = t.copy()
+    t["official"] = t.slug.map(off)
+    off_won = (t.side == t.official)
+    diff = t.official.notna() & (off_won != t.won.astype(bool))
+    n = int(diff.sum())
+    if n:
+        redeem = t.get("redeem_gas", 0)
+        payout = np.where(off_won, t.shares, 0.0)
+        pnl = payout - t.cost - t.fee - t.gas - np.where(off_won, redeem, 0.0)
+        t.loc[diff, "won"] = off_won[diff]
+        t.loc[diff, "pnl"] = pnl[diff]
+        t.loc[diff, "roi"] = (pnl / (t.cost + t.fee + t.gas))[diff]
+    return t, n
+
+
 def trade_summary(name, t):
     n = len(t)
     if n == 0:
@@ -131,6 +151,9 @@ def main(dirs):
     data = [(os.path.basename(os.path.normpath(d)), *load(d)) for d in dirs]
     for name, t, f, w in data:
         print(f"\n=== {name} ===")
+        t, ncorr = correct_trades(t, w)
+        if ncorr:
+            print(f"  NOT: {ncorr} işlemin sonucu windows.csv'deki resmi sonuca göre düzeltildi (bot yaklaşık Chainlink sonucuyla kapatmıştı).")
         trade_summary(name, t)
         outcomes, src = window_outcomes(f, w)
         print(f"  pencere sonuçları: {len(outcomes)} pencere, kaynak: {src}")

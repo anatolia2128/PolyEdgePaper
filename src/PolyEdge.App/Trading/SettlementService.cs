@@ -10,7 +10,7 @@ namespace PolyEdge.App.Trading;
 /// </summary>
 public sealed class SettlementService : BackgroundService
 {
-    private const int FallbackAfterSeconds = 180;
+    private const int FallbackAfterSeconds = 900;
 
     private readonly IPolymarketApi _api;
     private readonly PaperBroker _broker;
