@@ -94,7 +94,7 @@ Brier (bot vs piyasa), sinyal katkısı, tarafsız backtest ve iki örneğin pen
 
 ## Sniper modu (üçüncü örnek)
 `Strategy:Mode = Sniper` olan örnek olasılık modeli kullanmaz: bir tarafın **best ask'ı 0.95'e ulaşınca** (ve aynı tarafın bid'i ≥ 0.90 ise) o tarafı alır ve **çözüme kadar tutar**.
-Fee, gecikme (`LatencyMs`) ve gerçek order book slippage'ı normal şekilde uygulanır. Pencere başına en fazla bir işlem, sabit stake (`SniperStakeUsd`).
-Ayarlar: `SniperTriggerPrice`, `SniperMaxPrice`, `SniperMinBid`, `SniperMinSeconds`, `SniperMaxSeconds`, `SniperStakeUsd`.
+Fee, gecikme (`LatencyMs`) ve gerçek order book slippage'ı normal şekilde uygulanır. Yalnızca pencerenin **son 10 saniyesinde** (290-296. sn) işlem açar; pencere başına en fazla bir işlem, sabit stake (`SniperStakeUsd`). Emir pencere bitişinden sonra ulaşacaksa iptal edilir.
+Ayarlar: `SniperTriggerPrice`, `SniperMaxPrice`, `SniperMinBid`, `SniperMinSeconds`, `SniperMaxSeconds`, `SniperMaxBookAgeMs`, `SniperStakeUsd`.
 Kurulum (mevcut `flow`/`noflow` örneklerine dokunmadan): `bash deploy/install.sh sniper` → port 5082, veri `/var/lib/polyedge/sniper`.
 Başa baş koşulu: kazanma oranı > ortalama giriş fiyatı + fee + slippage. Bu fiyatlarda bir kayıp ~19 kazancı siler; anlamlı sonuç için yüzlerce işlem gerekir.

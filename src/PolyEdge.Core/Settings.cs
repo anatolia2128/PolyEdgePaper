@@ -56,9 +56,12 @@ public sealed class StrategySettings
     public decimal SniperMaxPrice { get; set; } = 0.99m;
     /// <summary>Sniper: aynı tarafın best bid'i en az bu olmalı (gerçek mutabakat; ince/çökmüş defteri eler).</summary>
     public decimal SniperMinBid { get; set; } = 0.90m;
-    public double SniperMinSeconds { get; set; } = 30;
-    /// <summary>Gecikme payı bırakmak için pencere sonundan önce kesilir.</summary>
-    public double SniperMaxSeconds { get; set; } = 290;
+    /// <summary>Sniper yalnızca pencerenin SON saniyelerinde işlem açar: elapsed >= bu değer (300 sn pencerede 290 = son 10 sn).</summary>
+    public double SniperMinSeconds { get; set; } = 290;
+    /// <summary>Emrin pencere bitmeden ulaşması için gecikme payı bırakır (karar bu saniyeden sonra verilmez).</summary>
+    public double SniperMaxSeconds { get; set; } = 296;
+    /// <summary>Sniper için order book yaşı üst sınırı (son saniyelerde bayat defterle karar verilmesin).</summary>
+    public int SniperMaxBookAgeMs { get; set; } = 1500;
     /// <summary>Sniper: işlem başına sabit stake (USD). Kelly kullanılmaz.</summary>
     public decimal SniperStakeUsd { get; set; } = 50m;
     public double EntryMinSeconds { get; set; } = 20;

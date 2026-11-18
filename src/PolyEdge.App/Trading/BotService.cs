@@ -237,11 +237,11 @@ public sealed class BotService : BackgroundService
     private async Task<string> DecideSniperAsync(WindowCtx ctx, Eval? ev, DateTimeOffset now, CancellationToken ct)
     {
         var elapsed = (now - ctx.Start).TotalSeconds;
-        if (elapsed < _st.SniperMinSeconds) return $"[Sniper] {_st.SniperMinSeconds:0}. saniyeden önce giriş yok.";
+        if (elapsed < _st.SniperMinSeconds) return $"[Sniper] Son {_b.WindowSeconds - _st.SniperMinSeconds:0} saniye bekleniyor (giriş {_st.SniperMinSeconds:0}-{_st.SniperMaxSeconds:0}. saniye arası).";
         if (elapsed > _st.SniperMaxSeconds) return "[Sniper] Giriş penceresi kapandı; sonuç bekleniyor.";
 
         var bookAge = (now - new[] { ctx.Up!.At, ctx.Down!.At }.Min()).TotalMilliseconds;
-        if (bookAge > _st.MaxBookAgeMs) return $"[Sniper] Order book bayat ({bookAge / 1000:0.0}s).";
+        if (bookAge > _st.SniperMaxBookAgeMs) return $"[Sniper] Order book bayat ({bookAge / 1000:0.0}s).";
 
         Side? pickSide = null;
         BookSnapshot? pickBook = null;
@@ -280,6 +280,14 @@ public sealed class BotService : BackgroundService
         await Task.Delay(_ex.LatencyMs, ct);
         var fresh = await _api.GetBookAsync(decisionBook.TokenId, ct) ?? decisionBook;
         var limit = Math.Min(_st.SniperMaxPrice, ask + _ex.MaxSlippage);
+
+        // Gerçekçilik: emir pencere bitişinden sonra ulaşırsa market kapanmıştır, dolum yok.
+        if (DateTimeOffset.UtcNow >= ctx.End)
+        {
+            ctx.Done = true;
+            _log.LogInformation("[Sniper] Emir pencere bitişinden sonra ulaşacaktı, iptal.");
+            return "[Sniper] Emir pencere bitişinden sonra ulaşacaktı, iptal edildi.";
+        }
 
         // Sniper'da model yok: seçilen tarafın "olasılığı" = piyasa fiyatı (Brier/kalibrasyon için).
         var tctx = new TradeContext((double)ask, (double)ask, 0.0, ev?.Flow.Score ?? 0.0, ev?.RelPct ?? 0.0, decisionAt);

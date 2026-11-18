@@ -79,6 +79,12 @@ def trade_summary(name, t):
     print(f"[{name}] n={n}  kazanma={win:.3f}  ort.giriş fiyatı={t.avg_price.mean():.3f}  fark={win - t.avg_price.mean():+.3f} (±{se:.3f} hata payı)")
     print(f"        net PnL={t.pnl.sum():+.1f}  en iyi 5 işlem={top5:+.1f}  (onlarsız {t.pnl.sum() - top5:+.1f})  ort. işlem ROI={t.roi.mean():+.3f} 90%GA[{lo:+.2f},{hi:+.2f}]")
     print(f"        fee={t.fee.sum():.2f}  slippage={t.slippage_usd.sum():.2f}  Brier(final)={((t.final_prob - t.won.astype(float))**2).mean():.4f}  Brier(giriş fiyatı)={((t.avg_price - t.won.astype(float))**2).mean():.4f}")
+    try:
+        st = pd.to_datetime(t.slug.str.extract(r"(\d+)$")[0].astype("int64"), unit="s", utc=True)
+        el = (pd.to_datetime(t.decision_at, utc=True) - st).dt.total_seconds()
+        print(f"        giriş zamanı (pencere başından sn): min={el.min():.0f} medyan={el.median():.0f} maks={el.max():.0f}")
+    except Exception:
+        pass
     if "settle_source" in t:
         print("        çözüm kaynakları:", t.settle_source.value_counts().to_dict())
 
