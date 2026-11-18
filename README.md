@@ -90,3 +90,11 @@ pip install pandas numpy
 python tools/analyze.py sunucu-data/flow sunucu-data/noflow
 ```
 Brier (bot vs piyasa), sinyal katkısı, tarafsız backtest ve iki örneğin pencere bazlı PnL farkını (güven aralığıyla) yazar.
+
+
+## Sniper modu (üçüncü örnek)
+`Strategy:Mode = Sniper` olan örnek olasılık modeli kullanmaz: bir tarafın **best ask'ı 0.95'e ulaşınca** (ve aynı tarafın bid'i ≥ 0.90 ise) o tarafı alır ve **çözüme kadar tutar**.
+Fee, gecikme (`LatencyMs`) ve gerçek order book slippage'ı normal şekilde uygulanır. Pencere başına en fazla bir işlem, sabit stake (`SniperStakeUsd`).
+Ayarlar: `SniperTriggerPrice`, `SniperMaxPrice`, `SniperMinBid`, `SniperMinSeconds`, `SniperMaxSeconds`, `SniperStakeUsd`.
+Kurulum (mevcut `flow`/`noflow` örneklerine dokunmadan): `bash deploy/install.sh sniper` → port 5082, veri `/var/lib/polyedge/sniper`.
+Başa baş koşulu: kazanma oranı > ortalama giriş fiyatı + fee + slippage. Bu fiyatlarda bir kayıp ~19 kazancı siler; anlamlı sonuç için yüzlerce işlem gerekir.

@@ -47,6 +47,20 @@ public sealed class FlowSettings
 
 public sealed class StrategySettings
 {
+    /// <summary>"Model" = olasılık modeli + edge (flow/noflow örnekleri). "Sniper" = bir tarafın ask'ı tetik fiyata (örn. 0.95) ulaşınca al ve çözüme kadar tut.</summary>
+    public string Mode { get; set; } = "Model";
+    public bool IsSniper => Mode.Equals("Sniper", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Sniper: bir tarafın best ask'ı bu fiyata ulaşınca/aşınca alım yapılır.</summary>
+    public decimal SniperTriggerPrice { get; set; } = 0.95m;
+    /// <summary>Sniper: bu fiyatın üstünde alım yapılmaz (limit fiyat tavanı).</summary>
+    public decimal SniperMaxPrice { get; set; } = 0.99m;
+    /// <summary>Sniper: aynı tarafın best bid'i en az bu olmalı (gerçek mutabakat; ince/çökmüş defteri eler).</summary>
+    public decimal SniperMinBid { get; set; } = 0.90m;
+    public double SniperMinSeconds { get; set; } = 30;
+    /// <summary>Gecikme payı bırakmak için pencere sonundan önce kesilir.</summary>
+    public double SniperMaxSeconds { get; set; } = 290;
+    /// <summary>Sniper: işlem başına sabit stake (USD). Kelly kullanılmaz.</summary>
+    public decimal SniperStakeUsd { get; set; } = 50m;
     public double EntryMinSeconds { get; set; } = 20;
     public double EntryMaxSeconds { get; set; } = 240;
     /// <summary>Net edge (olasılık - maliyet) bu eşiğin altındaysa işlem yok.</summary>
