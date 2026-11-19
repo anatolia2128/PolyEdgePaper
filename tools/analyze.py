@@ -85,6 +85,14 @@ def trade_summary(name, t):
         print(f"        giriş zamanı (pencere başından sn): min={el.min():.0f} medyan={el.median():.0f} maks={el.max():.0f}")
     except Exception:
         pass
+    try:
+        tb = pd.cut(el, [0, 30, 60, 120, 180, 240, 270, 300])
+        g = t.assign(giris=tb).groupby("giris", observed=True).agg(n=("won", "size"), kazanma=("won", "mean"), ort_fiyat=("avg_price", "mean"), pnl=("pnl", "sum")).round(3)
+        g["fark"] = (g.kazanma - g.ort_fiyat).round(3)
+        print("        giriş saniyesine göre kırılım:")
+        print("        " + g.to_string().replace("\n", "\n        "))
+    except Exception:
+        pass
     if "settle_source" in t:
         print("        çözüm kaynakları:", t.settle_source.value_counts().to_dict())
 
