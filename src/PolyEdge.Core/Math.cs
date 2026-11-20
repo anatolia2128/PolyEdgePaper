@@ -40,6 +40,24 @@ public static class BookMath
     }
 
     public static decimal FloorShares(decimal v) => Math.Floor(v * 100m) / 100m;
+
+    /// <summary>
+    /// Verilen bütçeyi (maliyet + fee) AŞMAYACAK en büyük pay adedini, ask tarafını limit fiyata kadar yürüyerek bulur.
+    /// Böylece "stake" ile gerçek dolum maliyeti tutarlı kalır.
+    /// </summary>
+    public static BuyFill FillForBudget(IReadOnlyList<BookLevel> asks, decimal budget, decimal limitPrice, ExecutionSettings ex)
+    {
+        decimal lo = 0m, hi = 0m;
+        foreach (var l in asks) if (l.Price <= limitPrice) hi += l.Size;
+        for (var i = 0; i < 40 && hi - lo > 0.005m; i++)
+        {
+            var mid = (lo + hi) / 2m;
+            var f = WalkAsks(asks, mid, limitPrice, ex);
+            if (f.Cost + f.Fee <= budget) lo = mid; else hi = mid;
+        }
+        var shares = FloorShares(lo);
+        return WalkAsks(asks, shares, limitPrice, ex);
+    }
 }
 
 public static class ProbabilityModel

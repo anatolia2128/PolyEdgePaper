@@ -15,6 +15,7 @@ public sealed class StateStore
     private string TradesCsv => Path.Combine(_dir, "trades.csv");
     private string FeaturesCsv => Path.Combine(_dir, "features.csv");
     private string WindowsCsv => Path.Combine(_dir, "windows.csv");
+    private string BooksCsv => Path.Combine(_dir, "books.csv");
 
     public StateStore(string directory)
     {
@@ -37,7 +38,7 @@ public sealed class StateStore
     {
         lock (_g)
         {
-            foreach (var p in new[] { StatePath, TradesCsv, FeaturesCsv, WindowsCsv })
+            foreach (var p in new[] { StatePath, TradesCsv, FeaturesCsv, WindowsCsv, BooksCsv })
                 if (File.Exists(p)) File.Delete(p);
         }
     }
@@ -67,6 +68,12 @@ public sealed class StateStore
     {
         const string header = "time,slug,elapsed_s,binance,chainlink,rel_move_pct,sigma,flow_score,whale30_net,cvd15,depth_imb,liq30_net,p_model,p_market,p_final,up_bid,up_ask,down_bid,down_ask,edge_up,edge_down";
         Append(FeaturesCsv, header, line);
+    }
+
+    public void AppendBookRow(string line)
+    {
+        const string header = "time,slug,elapsed_s,up_bids,up_asks,down_bids,down_asks,binance,chainlink,binance_open,chainlink_open,sigma";
+        Append(BooksCsv, header, line);
     }
 
     public void AppendWindow(string line)

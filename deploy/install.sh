@@ -58,6 +58,13 @@ for name in "${INSTANCES[@]}"; do
       echo "Bot__StartingBalanceUsd=1000"
       [ "$name" = "noflow" ] && echo "Strategy__FlowWeight=0"
       [ "$name" = "sniper" ] && echo "Strategy__Mode=Sniper"
+      if [ "$name" = "sniperv2" ]; then
+        echo "Strategy__Mode=Sniper"
+        echo "Strategy__SniperRequireConfirm=true"
+        echo "Strategy__SniperUseEv=true"
+        echo "Bot__RecordBooks=true"
+        echo "Feeds__BookPollMs=500"
+      fi
     } | sudo tee "$envfile" >/dev/null
     echo "   $envfile oluşturuldu (port $port)"
   else

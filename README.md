@@ -99,3 +99,18 @@ Fee, gecikme (`LatencyMs`) ve gerçek order book slippage'ı normal şekilde uyg
 Ayarlar: `SniperTriggerPrice`, `SniperMaxPrice`, `SniperMinBid`, `SniperMinSeconds`, `SniperMaxSeconds`, `SniperMaxBookAgeMs`, `SniperStakeUsd`.
 Kurulum (mevcut `flow`/`noflow` örneklerine dokunmadan): `bash deploy/install.sh sniper` → port 5082, veri `/var/lib/polyedge/sniper`.
 Başa baş koşulu: kazanma oranı > ortalama giriş fiyatı + fee + slippage. Bu fiyatlarda bir kayıp ~19 kazancı siler; anlamlı sonuç için yüzlerce işlem gerekir.
+
+
+## Sniper v2 (doğrulama, EV, kayıt) ve bağımsız replay
+- **Düzeltmeler (tüm sniper örnekleri):** pay adedi, dolum anındaki GERÇEK defterden bütçeye (fee dahil) göre hesaplanır; taze defter alınamazsa emir iptal edilir
+  (bayat deftere dönülmez); dolumdan hemen önce tetik şartı (bid ≥ minbid, ask bant içinde) yeniden doğrulanır.
+- **İsteğe bağlı (varsayılan kapalı):** `Strategy:SniperRequireConfirm` (Chainlink z ≥ `SniperMinZ` ve Binance aynı yönde),
+  `Strategy:SniperUseEv` (p_kazanma = min(Φ(z_chainlink), 1-`SniperTailProb`); EV/maliyet ≥ `SniperMinEv`). Bunlar HİPOTEZDİR, kanıtlanmış değildir.
+- `bash deploy/install.sh sniperv2` → doğrulama + EV + `Bot__RecordBooks=true` açık örnek (port otomatik).
+- `Bot:RecordBooks=true` → `books.csv` (ilk 5 seviye, BookPollMs aralığıyla, 100. saniyeden sonra). Bağımsız backtest:
+  `python3 tools/sniper_replay.py /var/lib/polyedge/sniperv2` (A tetik / B +doğrulama / C +EV / D EV, aynı pencerelerde).
+
+
+## Skew backtest
+`python3 tools/skew_backtest.py /var/lib/polyedge/flow` — "momentum (30 sn) + yarı-varyans skew (120 sn)" kuralını kayıtlı pencerelerde (resmi sonuç, fee dahil)
+yalnız-momentum, yalnız-skew ve yazı-tura tabanıyla karşılaştırır. Parametreler dosyanın başında sabittir; sonuca bakıp ayarlama.

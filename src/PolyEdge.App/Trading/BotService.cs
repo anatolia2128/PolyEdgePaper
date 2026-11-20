@@ -155,7 +155,7 @@ public sealed class BotService : BackgroundService
             await Task.WhenAll(upT, dnT);
             if (upT.Result is { } u) ctx.Up = u;
             if (dnT.Result is { } d) ctx.Down = d;
-            if (upT.Result is not null && dnT.Result is not null) _d.Health.MarkBook();
+            if (upT.Result is not null && dnT.Result is not null) { _d.Health.MarkBook(); RecordBooks(ctx); }
         }, ct);
     }
 
@@ -234,10 +234,12 @@ public sealed class BotService : BackgroundService
 
     // ---------------------------------------------------------------- sniper modu
 
+    private sealed record SniperCheck(bool Ok, string Reason, double Z, double PWin, double EvPerShare);
+
     private async Task<string> DecideSniperAsync(WindowCtx ctx, Eval? ev, DateTimeOffset now, CancellationToken ct)
     {
         var elapsed = (now - ctx.Start).TotalSeconds;
-        if (elapsed < _st.SniperMinSeconds) return $"[Sniper] Son {_b.WindowSeconds - _st.SniperMinSeconds:0} saniye bekleniyor (giriş {_st.SniperMinSeconds:0}-{_st.SniperMaxSeconds:0}. saniye arası).";
+        if (elapsed < _st.SniperMinSeconds) return $"[Sniper] Giriş penceresi {_st.SniperMinSeconds:0}-{_st.SniperMaxSeconds:0}. saniye arası; bekleniyor.";
         if (elapsed > _st.SniperMaxSeconds) return "[Sniper] Giriş penceresi kapandı; sonuç bekleniyor.";
 
         var bookAge = (now - new[] { ctx.Up!.At, ctx.Down!.At }.Min()).TotalMilliseconds;
@@ -258,56 +260,122 @@ public sealed class BotService : BackgroundService
         if (pickSide is null || pickBook is null)
             return $"[Sniper] Bekleniyor: hiçbir taraf {_st.SniperTriggerPrice:0.00}'a ulaşmadı (Up ask {ctx.Up!.BestAsk:0.00}, Down ask {ctx.Down!.BestAsk:0.00}).";
 
-        return await PlaceSniperAsync(ctx, ev, pickSide.Value, pickBook, now, ct);
+        var chk = SniperConfirm(ctx, ev, pickSide.Value, pickBook.BestAsk!.Value, now);
+        if (!chk.Ok)
+            return $"[Sniper] Tetik var ({pickSide} ask {pickBook.BestAsk:0.000}) ama doğrulama reddetti: {chk.Reason}";
+
+        return await PlaceSniperAsync(ctx, ev, pickSide.Value, pickBook, now, chk, ct);
     }
 
-    private async Task<string> PlaceSniperAsync(WindowCtx ctx, Eval? ev, Side side, BookSnapshot decisionBook, DateTimeOffset decisionAt, CancellationToken ct)
+    /// <summary>
+    /// Bağımsız doğrulama: Chainlink (marketin çözüm kaynağı) ve Binance seçilen tarafı desteklemeli (z-skoru),
+    /// ve beklenen net getiri (p_kazanma - maliyet) eşiği aşmalı. Ayarlarla kapalıysa her şeyi geçirir.
+    /// </summary>
+    private SniperCheck SniperConfirm(WindowCtx ctx, Eval? ev, Side side, decimal ask, DateTimeOffset now)
+    {
+        const double nan = double.NaN;
+        if (!_st.SniperRequireConfirm && !_st.SniperUseEv) return new(true, "", nan, nan, nan);
+        if (ev is null) return new(false, "Binance fiyatı/oynaklık henüz yok", nan, nan, nan);
+
+        var cl = _d.Chainlink.Latest;
+        if (cl is null || (now - cl.Value.Time).TotalSeconds > _st.SniperChainlinkMaxAgeSec)
+            return new(false, "Chainlink verisi bayat/yok", nan, nan, nan);
+        if (ctx.OpenChainlink is not { } clOpen)
+            return new(false, "Chainlink açılış fiyatı yok (pencere ortasında başlanmış)", nan, nan, nan);
+
+        var sd = Math.Max(ev.Sigma, _st.SigmaFloor) * Math.Sqrt(Math.Max(ev.SecondsLeft, 1.0));
+        var sign = side == Side.Up ? 1.0 : -1.0;
+        var zCl = sign * Math.Log((double)cl.Value.Price / (double)clOpen) / sd;
+        var zBin = sign * (ev.RelPct / 100.0) / sd;
+
+        if (_st.SniperRequireConfirm)
+        {
+            if (zBin <= 0) return new(false, $"Binance seçilen tarafı desteklemiyor (z={zBin:0.00})", zCl, nan, nan);
+            if (zCl < _st.SniperMinZ) return new(false, $"Chainlink z={zCl:0.00} < {_st.SniperMinZ:0.0}", zCl, nan, nan);
+        }
+
+        var pWin = Math.Min(ProbabilityModel.NormalCdf(zCl), 1.0 - _st.SniperTailProb);
+        var cost = (double)(ask + FeeModel.FeePerShare(ask, _ex) + _st.SniperSlipBuffer);
+        var evShare = pWin - cost;
+        if (_st.SniperUseEv && evShare / cost < _st.SniperMinEv)
+            return new(false, $"beklenen net getiri düşük (p={pWin:P1}, maliyet={cost:0.000}, EV={evShare / cost:P2})", zCl, pWin, evShare);
+
+        return new(true, "", zCl, pWin, evShare);
+    }
+
+    private async Task<string> PlaceSniperAsync(WindowCtx ctx, Eval? ev, Side side, BookSnapshot decisionBook, DateTimeOffset decisionAt, SniperCheck chk, CancellationToken ct)
     {
         ctx.Attempts++;
         var ask = decisionBook.BestAsk!.Value;
-        var perShare = ask + FeeModel.FeePerShare(ask, _ex);
 
-        var stake = Math.Min(_st.SniperStakeUsd, _broker.Equity() * _st.MaxStakeFractionOfEquity);
-        stake = Math.Min(stake, _broker.Cash);
-        var shares = BookMath.FloorShares(stake / perShare);
-        if (stake < _st.MinStakeUsd || shares < _ex.MinOrderShares)
+        string Abort(string why, bool final = false)
         {
-            ctx.Done = ctx.Attempts >= _st.MaxAttemptsPerWindow;
-            return $"[Sniper] Stake/pay adedi çok küçük (stake {stake:0.00} USD, {shares:0.##} pay).";
+            ctx.Done = final || ctx.Attempts >= _st.MaxAttemptsPerWindow;
+            _log.LogInformation("[Sniper] Emir iptal ({Side}): {Why}", side, why);
+            return $"[Sniper] Emir iptal: {why}";
         }
 
-        // Gecikme: emir LatencyMs sonra o andaki GERÇEK defterle dolar (slippage burada oluşur).
+        // Bütçe (fee ve gas dahil) belirlenir; pay adedi dolum anındaki GERÇEK defterden bütçeye göre hesaplanır.
+        var budget = Math.Min(_st.SniperStakeUsd, _broker.Equity() * _st.MaxStakeFractionOfEquity);
+        budget = Math.Min(budget, _broker.Cash) - _ex.GasUsdPerTrade;
+        if (budget < _st.MinStakeUsd) return Abort($"bütçe çok küçük ({budget:0.00} USD)");
+
+        // Gecikme: emir LatencyMs sonra ulaşır. TAZE defter alınamazsa bayat deftere dönülmez.
         await Task.Delay(_ex.LatencyMs, ct);
-        var fresh = await _api.GetBookAsync(decisionBook.TokenId, ct) ?? decisionBook;
-        var limit = Math.Min(_st.SniperMaxPrice, ask + _ex.MaxSlippage);
+        var fresh = await _api.GetBookAsync(decisionBook.TokenId, ct);
+        if (fresh is null) return Abort("taze order book alınamadı (bayat defterle işlem yapılmaz)");
 
-        // Gerçekçilik: emir pencere bitişinden sonra ulaşırsa market kapanmıştır, dolum yok.
         if (DateTimeOffset.UtcNow >= ctx.End)
-        {
-            ctx.Done = true;
-            _log.LogInformation("[Sniper] Emir pencere bitişinden sonra ulaşacaktı, iptal.");
-            return "[Sniper] Emir pencere bitişinden sonra ulaşacaktı, iptal edildi.";
-        }
+            return Abort("emir pencere bitişinden sonra ulaşacaktı", final: true);
 
-        // Sniper'da model yok: seçilen tarafın "olasılığı" = piyasa fiyatı (Brier/kalibrasyon için).
-        var tctx = new TradeContext((double)ask, (double)ask, 0.0, ev?.Flow.Score ?? 0.0, ev?.RelPct ?? 0.0, decisionAt);
-        var res = _broker.TryBuy(ctx.Market!, side, fresh, shares, limit, ask, tctx, DateTimeOffset.UtcNow);
+        // Dolumdan hemen önce tetik şartı taze defterde hâlâ geçerli mi?
+        if (fresh.BestBid is not { } fb || fb < _st.SniperMinBid)
+            return Abort($"taze defterde bid {fresh.BestBid?.ToString("0.000") ?? "yok"} < {_st.SniperMinBid:0.00}");
+        if (fresh.BestAsk is not { } fa || fa > _st.SniperMaxPrice || fa < _st.SniperTriggerPrice - _st.SniperRevalidateBand)
+            return Abort($"taze defterde ask {fresh.BestAsk?.ToString("0.000") ?? "yok"} tetik aralığı dışında");
 
-        if (!res.Ok)
-        {
-            ctx.Done = ctx.Attempts >= _st.MaxAttemptsPerWindow;
-            _log.LogInformation("[Sniper] Emir reddedildi ({Side}): {Reason}", side, res.Reason);
-            return $"[Sniper] Emir dolmadı: {res.Reason}";
-        }
+        var limit = Math.Min(_st.SniperMaxPrice, ask + _ex.MaxSlippage);
+        var fill = BookMath.FillForBudget(fresh.Asks, budget, limit, _ex);
+        if (fill.Shares < _ex.MinOrderShares)
+            return Abort($"limit {limit:0.000} içinde bütçeye ({budget:0.00} USD) sığan pay {fill.Shares:0.##} < min {_ex.MinOrderShares:0.##}");
+
+        // ModelProb = bağımsız doğrulamanın p_kazanma tahmini (varsa) → kalibrasyon analizi için; FinalProb = piyasa fiyatı.
+        var pWin = double.IsNaN(chk.PWin) ? (double)ask : chk.PWin;
+        var evShare = double.IsNaN(chk.EvPerShare) ? 0.0 : chk.EvPerShare;
+        var tctx = new TradeContext(pWin, (double)ask, evShare, ev?.Flow.Score ?? 0.0, ev?.RelPct ?? 0.0, decisionAt);
+        var res = _broker.TryBuy(ctx.Market!, side, fresh, fill.Shares, limit, ask, tctx, DateTimeOffset.UtcNow);
+
+        if (!res.Ok) return Abort($"emir dolmadı: {res.Reason}");
 
         var t = res.Trade!;
         ctx.Done = true;
         ctx.LastNote = $"[Sniper] İşlem #{t.Id}: {t.Side} {t.Shares:0.##} pay @ {t.AvgPrice:0.000}, çözüme kadar tutuluyor.";
         _store.Save(_broker.Export());
         _log.LogInformation(
-            "SNIPER AL #{Id} {Side} {Shares:0.##} pay @ {Avg:0.0000} (karar ask {Ask:0.000}) | maliyet {Cost:0.00} fee {Fee:0.0000} slippage {Slip:0.0000} | bakiye {Cash:0.00}",
-            t.Id, t.Side, t.Shares, t.AvgPrice, ask, t.Cost, t.Fee, t.SlippageUsd, _broker.Cash);
+            "SNIPER AL #{Id} {Side} {Shares:0.##} pay @ {Avg:0.0000} (karar ask {Ask:0.000}) | maliyet {Cost:0.00} fee {Fee:0.0000} slippage {Slip:0.0000} bütçe {Budget:0.00} | zChainlink={Z:0.00} pWin={P:P1} | bakiye {Cash:0.00}",
+            t.Id, t.Side, t.Shares, t.AvgPrice, ask, t.Cost, t.Fee, t.SlippageUsd, budget, chk.Z, pWin, _broker.Cash);
         return ctx.LastNote!;
+    }
+
+    // ---------------------------------------------------------------- defter kaydı (bağımsız replay/backtest için)
+
+    private void RecordBooks(WindowCtx ctx)
+    {
+        if (!_b.RecordBooks || ctx.Up is null || ctx.Down is null || ctx.Market is null) return;
+        var now = DateTimeOffset.UtcNow;
+        var elapsed = (now - ctx.Start).TotalSeconds;
+        if (elapsed < _b.RecordBooksFromSeconds || elapsed > _b.WindowSeconds + 5) return;
+
+        var inv = CultureInfo.InvariantCulture;
+        string L(IReadOnlyList<BookLevel> lv) => string.Join('|', lv.Take(5).Select(x => x.Price.ToString(inv) + ":" + x.Size.ToString(inv)));
+        string D(decimal? v) => v?.ToString(inv) ?? "";
+        var sigma = _d.Binance.SigmaPerSqrtSecond(_st.SigmaLookbackSeconds, _st.MinSigmaSamples);
+
+        _store.AppendBookRow(string.Join(',',
+            now.ToString("o"), ctx.Market.Slug, elapsed.ToString("0.00", inv),
+            L(ctx.Up.Bids), L(ctx.Up.Asks), L(ctx.Down.Bids), L(ctx.Down.Asks),
+            D(_d.Binance.Latest?.Price), D(_d.Chainlink.Latest?.Price), D(ctx.OpenBinance), D(ctx.OpenChainlink),
+            sigma?.ToString("0.########", inv) ?? ""));
     }
 
     private async Task<string> PlaceBuyAsync(WindowCtx ctx, Eval ev, Side side, BookSnapshot decisionBook,

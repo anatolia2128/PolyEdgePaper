@@ -12,6 +12,9 @@ public sealed class BotSettings
     public int WindowSeconds { get; set; } = 300;
     public int LoopMs { get; set; } = 250;
     public int FeatureLogSeconds { get; set; } = 5;
+    /// <summary>true ise her defter okumasında (BookPollMs) ilk 5 seviye + fiyatlar books.csv'ye yazılır → bağımsız replay/backtest için (tools/sniper_replay.py).</summary>
+    public bool RecordBooks { get; set; }
+    public int RecordBooksFromSeconds { get; set; } = 100;
     public bool IsSimulated => Mode.Equals("Simulated", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -62,8 +65,20 @@ public sealed class StrategySettings
     public double SniperMaxSeconds { get; set; } = 296;
     /// <summary>Sniper için order book yaşı üst sınırı (son saniyelerde bayat defterle karar verilmesin).</summary>
     public int SniperMaxBookAgeMs { get; set; } = 1500;
-    /// <summary>Sniper: işlem başına sabit stake (USD). Kelly kullanılmaz.</summary>
+    /// <summary>Sniper: işlem başına sabit stake (USD). Kelly kullanılmaz. Dolum, GERÇEK defter üzerinden bu bütçeyi (fee dahil) aşmayacak şekilde boyutlanır.</summary>
     public decimal SniperStakeUsd { get; set; } = 50m;
+    /// <summary>Sniper: dolumdan hemen önce taze defter bu bant içinde tetik şartını hâlâ sağlamalı (ask >= tetik - bant).</summary>
+    public decimal SniperRevalidateBand { get; set; } = 0.03m;
+    /// <summary>Sniper doğrulaması: Chainlink (çözüm kaynağı) VE Binance seçilen tarafı desteklemeli; z = hareket / (σ·√kalan süre).</summary>
+    public bool SniperRequireConfirm { get; set; }
+    public double SniperMinZ { get; set; } = 2.0;
+    public double SniperChainlinkMaxAgeSec { get; set; } = 5;
+    /// <summary>Sniper beklenen net getiri filtresi: p_kazanma = min(Φ(z_chainlink), 1 - SniperTailProb); EV/maliyet >= SniperMinEv.</summary>
+    public bool SniperUseEv { get; set; }
+    public double SniperMinEv { get; set; } = 0.005;
+    public double SniperTailProb { get; set; } = 0.005;
+    /// <summary>EV hesabında beklenen ek slippage payı (fiyat birimi).</summary>
+    public decimal SniperSlipBuffer { get; set; } = 0.003m;
     public double EntryMinSeconds { get; set; } = 20;
     public double EntryMaxSeconds { get; set; } = 240;
     /// <summary>Net edge (olasılık - maliyet) bu eşiğin altındaysa işlem yok.</summary>
