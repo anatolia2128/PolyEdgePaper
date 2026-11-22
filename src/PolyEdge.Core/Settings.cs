@@ -53,6 +53,18 @@ public sealed class StrategySettings
     /// <summary>"Model" = olasılık modeli + edge (flow/noflow örnekleri). "Sniper" = bir tarafın ask'ı tetik fiyata (örn. 0.95) ulaşınca al ve çözüme kadar tut.</summary>
     public string Mode { get; set; } = "Model";
     public bool IsSniper => Mode.Equals("Sniper", StringComparison.OrdinalIgnoreCase);
+    /// <summary>"Skew": momentum (30 sn) + yarı-varyans skew aynı yöndeyse o tarafı al, çözüme kadar tut.</summary>
+    public bool IsSkew => Mode.Equals("Skew", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Skew: momentum = (BTC_şimdi - BTC_N_sn_önce) / BTC_N_sn_önce * 100.</summary>
+    public double SkewMomentumSeconds { get; set; } = 30;
+    /// <summary>Skew: yarı-varyans penceresi (sn). Tarifte belirtilmemiş; backtest ile aynı (120) sabitlendi.</summary>
+    public int SkewLookbackSeconds { get; set; } = 120;
+    /// <summary>Skew: sinyal eşikleri. 0 = tarifteki gibi yalnızca işaret (momentum > 0 ve skew > 0).</summary>
+    public double SkewMinMomentumPct { get; set; } = 0.0;
+    public double SkewMinAbsSkew { get; set; } = 0.0;
+    public double SkewMinSeconds { get; set; } = 30;
+    public double SkewMaxSeconds { get; set; } = 240;
+    public decimal SkewStakeUsd { get; set; } = 50m;
     /// <summary>Sniper: bir tarafın best ask'ı bu fiyata ulaşınca/aşınca alım yapılır.</summary>
     public decimal SniperTriggerPrice { get; set; } = 0.95m;
     /// <summary>Sniper: bu fiyatın üstünde alım yapılmaz (limit fiyat tavanı).</summary>

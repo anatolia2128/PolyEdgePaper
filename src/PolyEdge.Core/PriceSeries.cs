@@ -97,6 +97,35 @@ public sealed class PriceSeries
         }
     }
 
+    /// <summary>
+    /// Son lookbackSeconds'taki log getirilerden yarı-varyans skew: (RV+ - RV-) / (RV+ + RV-),
+    /// RV+ = Σ max(r,0)², RV- = Σ min(r,0)². Veri yetersiz ya da aralıklıysa null.
+    /// </summary>
+    public double? SemivarianceSkew(int lookbackSeconds, int minReturns)
+    {
+        lock (_g)
+        {
+            if (_pts.Count < minReturns + 1) return null;
+            var end = _pts[^1].Time;
+            double up = 0, dn = 0, maxGap = 0;
+            var n = 0;
+            DateTimeOffset? first = null;
+            for (var i = _pts.Count - 1; i > 0; i--)
+            {
+                if ((end - _pts[i].Time).TotalSeconds > lookbackSeconds) break;
+                var dt = (_pts[i].Time - _pts[i - 1].Time).TotalSeconds;
+                if (dt <= 0) continue;
+                maxGap = Math.Max(maxGap, dt);
+                var r = Math.Log((double)_pts[i].Price / (double)_pts[i - 1].Price);
+                if (r > 0) up += r * r; else if (r < 0) dn += r * r;
+                n++;
+                first = _pts[i - 1].Time;
+            }
+            if (n < minReturns || maxGap > 10 || first is null || (end - first.Value).TotalSeconds < lookbackSeconds - 10 || up + dn <= 0) return null;
+            return (up - dn) / (up + dn);
+        }
+    }
+
     private int LowerBound(DateTimeOffset t)
     {
         int lo = 0, hi = _pts.Count;

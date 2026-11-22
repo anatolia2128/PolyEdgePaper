@@ -114,3 +114,10 @@ Başa baş koşulu: kazanma oranı > ortalama giriş fiyatı + fee + slippage. B
 ## Skew backtest
 `python3 tools/skew_backtest.py /var/lib/polyedge/flow` — "momentum (30 sn) + yarı-varyans skew (120 sn)" kuralını kayıtlı pencerelerde (resmi sonuç, fee dahil)
 yalnız-momentum, yalnız-skew ve yazı-tura tabanıyla karşılaştırır. Parametreler dosyanın başında sabittir; sonuca bakıp ayarlama.
+
+
+## Skew modu (canlı paper)
+`Strategy:Mode = Skew` (örnek: `bash deploy/install.sh skew`): momentum = (BTC_şimdi − BTC_30sn_önce)/BTC_30sn_önce·100 ve yarı-varyans skew = (RV+ − RV−)/(RV+ + RV−)
+(Binance 1 sn'lik seri, son 120 sn). İkisi de > 0 → Up, ikisi de < 0 → Down; pencere başına İLK uyuşmada (30-240. sn), ask 0.10-0.90 ve spread ≤ 0.06 ise
+taze defterle, gecikme + fee + gerçek derinlik modeliyle alır, çözüme kadar tutar (50 USD bütçe). `trades.csv`'de `flow_score` = skew, `rel_move_pct` = momentum (%).
+Parametreler (`SkewMomentumSeconds`, `SkewLookbackSeconds`, eşikler) önceden sabittir; sonuca bakıp ayarlama. 120 sn pencere tarifte yoktur, varsayımdır.

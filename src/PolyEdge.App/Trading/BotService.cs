@@ -109,7 +109,7 @@ public sealed class BotService : BackgroundService
         ctx.OpenBinance = ob?.Price;
         ctx.OpenChainlink = _d.Chainlink.AtOrBefore(start, TimeSpan.FromSeconds(10))?.Price;
 
-        if (ctx.OpenBinance is null && !_st.IsSniper)
+        if (ctx.OpenBinance is null && !_st.IsSniper && !_st.IsSkew)
             ctx.SkipReason = "Pencere açılışında Binance verisi yok (bot pencere ortasında başladı). Sonraki pencere bekleniyor.";
 
         _log.LogInformation("Yeni pencere {Start:HH:mm:ss} UTC | açılış Binance={Open} Chainlink={Cl}{Skip}",
@@ -206,6 +206,7 @@ public sealed class BotService : BackgroundService
         if (ctx.Done) return ctx.LastNote ?? "Bu pencerede işlem tamamlandı.";
         if (ctx.Up is null || ctx.Down is null) return "Order book bekleniyor.";
         if (_st.IsSniper) return await DecideSniperAsync(ctx, ev, now, ct);
+        if (_st.IsSkew) return await DecideSkewAsync(ctx, now, ct);
         if (ev is null) return "Veri ısınıyor (Binance fiyatı / oynaklık).";
 
         if (ev.Elapsed < _st.EntryMinSeconds) return $"Giriş penceresi {_st.EntryMinSeconds:0}. saniyede açılır.";
@@ -230,6 +231,88 @@ public sealed class BotService : BackgroundService
         }
 
         return $"Edge yetersiz (Up {Pct(ev.EdgeUp)}, Down {Pct(ev.EdgeDown)}; eşik {_st.MinEdge * 100:0.0}%).";
+    }
+
+    // ---------------------------------------------------------------- skew modu (momentum + yarı-varyans skew)
+
+    private async Task<string> DecideSkewAsync(WindowCtx ctx, DateTimeOffset now, CancellationToken ct)
+    {
+        var elapsed = (now - ctx.Start).TotalSeconds;
+        if (elapsed < _st.SkewMinSeconds) return $"[Skew] Giriş {_st.SkewMinSeconds:0}-{_st.SkewMaxSeconds:0}. saniye arası; bekleniyor.";
+        if (elapsed > _st.SkewMaxSeconds) return "[Skew] Giriş penceresi kapandı; sonuç bekleniyor.";
+
+        var bookAge = (now - new[] { ctx.Up!.At, ctx.Down!.At }.Min()).TotalMilliseconds;
+        if (bookAge > _st.MaxBookAgeMs) return $"[Skew] Order book bayat ({bookAge / 1000:0.0}s).";
+
+        var last = _d.Binance.Latest;
+        if (last is null || (now - last.Value.Time).TotalSeconds > 3) return "[Skew] Binance fiyatı bayat/yok.";
+        var past = _d.Binance.AtOrBefore(now.AddSeconds(-_st.SkewMomentumSeconds), TimeSpan.FromSeconds(3));
+        var skewV = _d.Binance.SemivarianceSkew(_st.SkewLookbackSeconds, (int)(_st.SkewLookbackSeconds * 0.5));
+        if (past is null || skewV is null) return "[Skew] Veri ısınıyor (momentum / yarı-varyans için yeterli 1 sn'lik veri yok).";
+
+        var mom = (double)((last.Value.Price - past.Value.Price) / past.Value.Price) * 100.0;
+        var skew = skewV.Value;
+        var info = $"momentum {mom:+0.0000;-0.0000}%, skew {skew:+0.00;-0.00}";
+
+        Side? side = null;
+        if (mom > _st.SkewMinMomentumPct && skew > _st.SkewMinAbsSkew) side = Side.Up;
+        else if (mom < -_st.SkewMinMomentumPct && skew < -_st.SkewMinAbsSkew) side = Side.Down;
+        if (side is null) return $"[Skew] Sinyal uyuşmuyor ({info}); bekleniyor.";
+
+        var book = side == Side.Up ? ctx.Up! : ctx.Down!;
+        if (book.BestAsk is not { } ask || book.BestBid is not { } bid)
+            return $"[Skew] Sinyal {side} ({info}) ama o tarafta defter boş.";
+        if (ask < _st.MinEntryPrice || ask > _st.MaxEntryPrice)
+            return $"[Skew] Sinyal {side} ({info}) ama ask {ask:0.000} izinli aralık dışında.";
+        if (ask - bid > _st.MaxSpread)
+            return $"[Skew] Sinyal {side} ({info}) ama spread {ask - bid:0.000} çok geniş.";
+
+        return await PlaceSkewAsync(ctx, side.Value, book, now, mom, skew, ct);
+    }
+
+    private async Task<string> PlaceSkewAsync(WindowCtx ctx, Side side, BookSnapshot decisionBook, DateTimeOffset decisionAt, double mom, double skew, CancellationToken ct)
+    {
+        ctx.Attempts++;
+        var ask = decisionBook.BestAsk!.Value;
+
+        string Abort(string why, bool final = false)
+        {
+            ctx.Done = final || ctx.Attempts >= _st.MaxAttemptsPerWindow;
+            _log.LogInformation("[Skew] Emir iptal ({Side}): {Why}", side, why);
+            return $"[Skew] Emir iptal: {why}";
+        }
+
+        var budget = Math.Min(_st.SkewStakeUsd, _broker.Equity() * _st.MaxStakeFractionOfEquity);
+        budget = Math.Min(budget, _broker.Cash) - _ex.GasUsdPerTrade;
+        if (budget < _st.MinStakeUsd) return Abort($"bütçe çok küçük ({budget:0.00} USD)");
+
+        await Task.Delay(_ex.LatencyMs, ct);
+        var fresh = await _api.GetBookAsync(decisionBook.TokenId, ct);
+        if (fresh is null) return Abort("taze order book alınamadı (bayat defterle işlem yapılmaz)");
+        if (DateTimeOffset.UtcNow >= ctx.End) return Abort("emir pencere bitişinden sonra ulaşacaktı", final: true);
+
+        if (fresh.BestAsk is not { } fa || fresh.BestBid is not { } fb ||
+            fa < _st.MinEntryPrice || fa > _st.MaxEntryPrice || fa - fb > _st.MaxSpread)
+            return Abort($"taze defterde fiyat/spread uygun değil (ask {fresh.BestAsk?.ToString("0.000") ?? "yok"}, bid {fresh.BestBid?.ToString("0.000") ?? "yok"})");
+
+        var limit = Math.Min(_st.MaxEntryPrice, ask + _ex.MaxSlippage);
+        var fill = BookMath.FillForBudget(fresh.Asks, budget, limit, _ex);
+        if (fill.Shares < _ex.MinOrderShares)
+            return Abort($"limit {limit:0.000} içinde bütçeye ({budget:0.00} USD) sığan pay {fill.Shares:0.##} < min {_ex.MinOrderShares:0.##}");
+
+        // Analiz için: flow_score sütunu = skew, rel_move_pct sütunu = momentum (%).
+        var tctx = new TradeContext((double)ask, (double)ask, 0.0, skew, mom, decisionAt);
+        var res = _broker.TryBuy(ctx.Market!, side, fresh, fill.Shares, limit, ask, tctx, DateTimeOffset.UtcNow);
+        if (!res.Ok) return Abort($"emir dolmadı: {res.Reason}");
+
+        var t = res.Trade!;
+        ctx.Done = true;
+        ctx.LastNote = $"[Skew] İşlem #{t.Id}: {t.Side} {t.Shares:0.##} pay @ {t.AvgPrice:0.000} (momentum {mom:+0.0000;-0.0000}%, skew {skew:+0.00;-0.00}).";
+        _store.Save(_broker.Export());
+        _log.LogInformation(
+            "SKEW AL #{Id} {Side} {Shares:0.##} pay @ {Avg:0.0000} (karar ask {Ask:0.000}) | maliyet {Cost:0.00} fee {Fee:0.0000} slippage {Slip:0.0000} | momentum {Mom:+0.0000;-0.0000}% skew {Skew:+0.00;-0.00} | bakiye {Cash:0.00}",
+            t.Id, t.Side, t.Shares, t.AvgPrice, ask, t.Cost, t.Fee, t.SlippageUsd, mom, skew, _broker.Cash);
+        return ctx.LastNote!;
     }
 
     // ---------------------------------------------------------------- sniper modu

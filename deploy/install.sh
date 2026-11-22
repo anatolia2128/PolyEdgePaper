@@ -58,6 +58,7 @@ for name in "${INSTANCES[@]}"; do
       echo "Bot__StartingBalanceUsd=1000"
       [ "$name" = "noflow" ] && echo "Strategy__FlowWeight=0"
       [ "$name" = "sniper" ] && echo "Strategy__Mode=Sniper"
+      [ "$name" = "skew" ] && echo "Strategy__Mode=Skew"
       if [ "$name" = "sniperv2" ]; then
         echo "Strategy__Mode=Sniper"
         echo "Strategy__SniperRequireConfirm=true"
