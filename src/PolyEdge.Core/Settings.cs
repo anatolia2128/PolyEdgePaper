@@ -68,7 +68,7 @@ public sealed class StrategySettings
     /// <summary>Sniper: bir tarafın best ask'ı bu fiyata ulaşınca/aşınca alım yapılır.</summary>
     public decimal SniperTriggerPrice { get; set; } = 0.95m;
     /// <summary>Sniper: bu fiyatın üstünde alım yapılmaz (limit fiyat tavanı).</summary>
-    public decimal SniperMaxPrice { get; set; } = 0.99m;
+    public decimal SniperMaxPrice { get; set; } = 0.97m;
     /// <summary>Sniper: aynı tarafın best bid'i en az bu olmalı (gerçek mutabakat; ince/çökmüş defteri eler).</summary>
     public decimal SniperMinBid { get; set; } = 0.90m;
     /// <summary>Sniper giriş penceresinin başı (pencere başından saniye). NOT: kayıtlı defterlerde son ~10 sn'de favori tarafta satıcı kalmıyor (ask boş), bu yüzden 290 gibi değerler dolum üretmez. Varsayılan 150.</summary>
@@ -78,15 +78,25 @@ public sealed class StrategySettings
     /// <summary>Sniper için order book yaşı üst sınırı (son saniyelerde bayat defterle karar verilmesin).</summary>
     public int SniperMaxBookAgeMs { get; set; } = 1500;
     /// <summary>Sniper: işlem başına sabit stake (USD). Kelly kullanılmaz. Dolum, GERÇEK defter üzerinden bu bütçeyi (fee dahil) aşmayacak şekilde boyutlanır.</summary>
-    public decimal SniperStakeUsd { get; set; } = 50m;
+    public decimal SniperStakeUsd { get; set; } = 10m;
+    /// <summary>Sniper için özsermaye başına azami risk bütçesi. Varsayılan %1.</summary>
+    public decimal SniperMaxStakeFractionOfEquity { get; set; } = 0.01m;
+    /// <summary>Sniper girişinde azami bid-ask spread. Geniş spread'de işlem açılmaz.</summary>
+    public decimal SniperMaxSpread { get; set; } = 0.02m;
+    /// <summary>Emir bütçesinin en az ne kadarı defter derinliğinde karşılanabilmeli.</summary>
+    public decimal SniperMinBudgetFillRatio { get; set; } = 0.90m;
+    /// <summary>UTC gününde gerçekleşen net zarar bu oranı aşarsa yeni Sniper işlemi durur.</summary>
+    public decimal SniperDailyLossLimitFraction { get; set; } = 0.02m;
+    /// <summary>Arka arkaya bu sayıda kayıp sonrası yeni Sniper işlemi durur.</summary>
+    public int SniperMaxConsecutiveLosses { get; set; } = 2;
     /// <summary>Sniper: dolumdan hemen önce taze defter bu bant içinde tetik şartını hâlâ sağlamalı (ask >= tetik - bant).</summary>
     public decimal SniperRevalidateBand { get; set; } = 0.03m;
     /// <summary>Sniper doğrulaması: Chainlink (çözüm kaynağı) VE Binance seçilen tarafı desteklemeli; z = hareket / (σ·√kalan süre).</summary>
-    public bool SniperRequireConfirm { get; set; }
+    public bool SniperRequireConfirm { get; set; } = true;
     public double SniperMinZ { get; set; } = 2.0;
     public double SniperChainlinkMaxAgeSec { get; set; } = 5;
     /// <summary>Sniper beklenen net getiri filtresi: p_kazanma = min(Φ(z_chainlink), 1 - SniperTailProb); EV/maliyet >= SniperMinEv.</summary>
-    public bool SniperUseEv { get; set; }
+    public bool SniperUseEv { get; set; } = true;
     public double SniperMinEv { get; set; } = 0.005;
     public double SniperTailProb { get; set; } = 0.005;
     /// <summary>EV hesabında beklenen ek slippage payı (fiyat birimi).</summary>

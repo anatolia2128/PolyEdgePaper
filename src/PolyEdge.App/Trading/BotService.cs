@@ -325,6 +325,9 @@ public sealed class BotService : BackgroundService
         if (elapsed < _st.SniperMinSeconds) return $"[Sniper] Giriş penceresi {_st.SniperMinSeconds:0}-{_st.SniperMaxSeconds:0}. saniye arası; bekleniyor.";
         if (elapsed > _st.SniperMaxSeconds) return "[Sniper] Giriş penceresi kapandı; sonuç bekleniyor.";
 
+        var riskStop = SniperRiskStopReason(now);
+        if (riskStop is not null) return $"[Sniper] RİSK KİLİDİ: {riskStop}";
+
         var bookAge = (now - new[] { ctx.Up!.At, ctx.Down!.At }.Min()).TotalMilliseconds;
         if (bookAge > _st.SniperMaxBookAgeMs) return $"[Sniper] Order book bayat ({bookAge / 1000:0.0}s).";
 
@@ -334,6 +337,7 @@ public sealed class BotService : BackgroundService
         {
             if (book.BestAsk is { } a && book.BestBid is { } b &&
                 a >= _st.SniperTriggerPrice && a <= _st.SniperMaxPrice && b >= _st.SniperMinBid &&
+                a - b <= _st.SniperMaxSpread &&
                 (pickBook is null || a > pickBook.BestAsk!.Value))
             {
                 pickSide = side; pickBook = book;
@@ -341,7 +345,7 @@ public sealed class BotService : BackgroundService
         }
 
         if (pickSide is null || pickBook is null)
-            return $"[Sniper] Bekleniyor: hiçbir taraf {_st.SniperTriggerPrice:0.00}'a ulaşmadı (Up ask {ctx.Up!.BestAsk:0.00}, Down ask {ctx.Down!.BestAsk:0.00}).";
+            return $"[Sniper] Uygun tetik yok: ask {_st.SniperTriggerPrice:0.00}-{_st.SniperMaxPrice:0.00}, bid >= {_st.SniperMinBid:0.00}, spread <= {_st.SniperMaxSpread:0.000} olmalı (Up {ctx.Up!.BestBid:0.00}/{ctx.Up.BestAsk:0.00}, Down {ctx.Down!.BestBid:0.00}/{ctx.Down.BestAsk:0.00}).";
 
         var chk = SniperConfirm(ctx, ev, pickSide.Value, pickBook.BestAsk!.Value, now);
         if (!chk.Ok)
@@ -350,11 +354,36 @@ public sealed class BotService : BackgroundService
         return await PlaceSniperAsync(ctx, ev, pickSide.Value, pickBook, now, chk, ct);
     }
 
+    private string? SniperRiskStopReason(DateTimeOffset now)
+    {
+        var trades = _broker.AllTrades();
+        var today = now.UtcDateTime.Date;
+        var todayPnl = trades
+            .Where(t => !t.IsOpen && t.SettledAt is { } settled && settled.UtcDateTime.Date == today)
+            .Sum(t => t.Pnl ?? 0m);
+        var lossLimit = _broker.Equity() * _st.SniperDailyLossLimitFraction;
+        if (_st.SniperDailyLossLimitFraction > 0 && todayPnl <= -lossLimit)
+            return $"günlük gerçekleşmiş PnL {todayPnl:0.00} USD, limit -{lossLimit:0.00} USD";
+
+        if (_st.SniperMaxConsecutiveLosses > 0)
+        {
+            var consecutive = 0;
+            foreach (var t in trades.Where(t => !t.IsOpen && t.SettledAt is not null).OrderByDescending(t => t.SettledAt))
+            {
+                if (t.Won == true) break;
+                consecutive++;
+            }
+            if (consecutive >= _st.SniperMaxConsecutiveLosses)
+                return $"son {consecutive} sonuç arka arkaya kayıp; manuel inceleme için durduruldu";
+        }
+        return null;
+    }
+
     /// <summary>
     /// Bağımsız doğrulama: Chainlink (marketin çözüm kaynağı) ve Binance seçilen tarafı desteklemeli (z-skoru),
     /// ve beklenen net getiri (p_kazanma - maliyet) eşiği aşmalı. Ayarlarla kapalıysa her şeyi geçirir.
     /// </summary>
-    private SniperCheck SniperConfirm(WindowCtx ctx, Eval? ev, Side side, decimal ask, DateTimeOffset now)
+    private SniperCheck SniperConfirm(WindowCtx ctx, Eval? ev, Side side, decimal ask, DateTimeOffset now, double extraCostPerShare = 0.0)
     {
         const double nan = double.NaN;
         if (!_st.SniperRequireConfirm && !_st.SniperUseEv) return new(true, "", nan, nan, nan);
@@ -378,7 +407,7 @@ public sealed class BotService : BackgroundService
         }
 
         var pWin = Math.Min(ProbabilityModel.NormalCdf(zCl), 1.0 - _st.SniperTailProb);
-        var cost = (double)(ask + FeeModel.FeePerShare(ask, _ex) + _st.SniperSlipBuffer);
+        var cost = (double)(ask + FeeModel.FeePerShare(ask, _ex) + _st.SniperSlipBuffer) + extraCostPerShare;
         var evShare = pWin - cost;
         if (_st.SniperUseEv && evShare / cost < _st.SniperMinEv)
             return new(false, $"beklenen net getiri düşük (p={pWin:P1}, maliyet={cost:0.000}, EV={evShare / cost:P2})", zCl, pWin, evShare);
@@ -399,7 +428,8 @@ public sealed class BotService : BackgroundService
         }
 
         // Bütçe (fee ve gas dahil) belirlenir; pay adedi dolum anındaki GERÇEK defterden bütçeye göre hesaplanır.
-        var budget = Math.Min(_st.SniperStakeUsd, _broker.Equity() * _st.MaxStakeFractionOfEquity);
+        var equity = _broker.Equity();
+        var budget = Math.Min(_st.SniperStakeUsd, equity * _st.SniperMaxStakeFractionOfEquity);
         budget = Math.Min(budget, _broker.Cash) - _ex.GasUsdPerTrade;
         if (budget < _st.MinStakeUsd) return Abort($"bütçe çok küçük ({budget:0.00} USD)");
 
@@ -408,6 +438,9 @@ public sealed class BotService : BackgroundService
         var fresh = await _api.GetBookAsync(decisionBook.TokenId, ct);
         if (fresh is null) return Abort("taze order book alınamadı (bayat defterle işlem yapılmaz)");
 
+        var fillNow = DateTimeOffset.UtcNow;
+        if ((fillNow - fresh.At).TotalMilliseconds > _st.SniperMaxBookAgeMs)
+            return Abort($"taze defterin zaman damgası bayat ({(fillNow - fresh.At).TotalMilliseconds:0} ms)");
         if (DateTimeOffset.UtcNow >= ctx.End)
             return Abort("emir pencere bitişinden sonra ulaşacaktı", final: true);
 
@@ -416,16 +449,31 @@ public sealed class BotService : BackgroundService
             return Abort($"taze defterde bid {fresh.BestBid?.ToString("0.000") ?? "yok"} < {_st.SniperMinBid:0.00}");
         if (fresh.BestAsk is not { } fa || fa > _st.SniperMaxPrice || fa < _st.SniperTriggerPrice - _st.SniperRevalidateBand)
             return Abort($"taze defterde ask {fresh.BestAsk?.ToString("0.000") ?? "yok"} tetik aralığı dışında");
+        if (fa - fb > _st.SniperMaxSpread)
+            return Abort($"taze defter spread'i çok geniş ({fa - fb:0.000} > {_st.SniperMaxSpread:0.000})");
 
-        var limit = Math.Min(_st.SniperMaxPrice, ask + _ex.MaxSlippage);
+        // Limit, eski karar ask'ına değil gecikme sonrası taze ask'a göre hesaplanır.
+        var limit = Math.Min(_st.SniperMaxPrice, fa + _ex.MaxSlippage);
         var fill = BookMath.FillForBudget(fresh.Asks, budget, limit, _ex);
         if (fill.Shares < _ex.MinOrderShares)
             return Abort($"limit {limit:0.000} içinde bütçeye ({budget:0.00} USD) sığan pay {fill.Shares:0.##} < min {_ex.MinOrderShares:0.##}");
+        var filledBudget = fill.Cost + fill.Fee;
+        if (_st.SniperMinBudgetFillRatio > 0 && filledBudget < budget * _st.SniperMinBudgetFillRatio)
+            return Abort($"defter derinliği yetersiz: bütçenin yalnızca {filledBudget / budget:P0} kadarı dolabilir");
 
-        // ModelProb = bağımsız doğrulamanın p_kazanma tahmini (varsa) → kalibrasyon analizi için; FinalProb = piyasa fiyatı.
-        var pWin = double.IsNaN(chk.PWin) ? (double)ask : chk.PWin;
-        var evShare = double.IsNaN(chk.EvPerShare) ? 0.0 : chk.EvPerShare;
-        var tctx = new TradeContext(pWin, (double)ask, evShare, ev?.Flow.Score ?? 0.0, ev?.RelPct ?? 0.0, decisionAt);
+        // Gecikme sonrası Chainlink/Binance doğrulamasını yeniden yap; EV'yi gerçekleşebilir ortalama fiyattan hesapla.
+        var freshEval = Evaluate(ctx, DateTimeOffset.UtcNow);
+        if ((_st.SniperRequireConfirm || _st.SniperUseEv) && freshEval is null)
+            return Abort("gecikme sonrası güncel fiyat/oynaklık doğrulanamadı");
+        var extraCostPerShare = (double)((_ex.GasUsdPerTrade + _ex.RedeemGasUsd) / fill.Shares);
+        var finalCheck = SniperConfirm(ctx, freshEval, side, fill.AvgPrice, DateTimeOffset.UtcNow, extraCostPerShare);
+        if (!finalCheck.Ok)
+            return Abort($"gecikme sonrası risk doğrulaması reddetti: {finalCheck.Reason}");
+
+        // ModelProb = Chainlink tabanlı doğrulama olasılığı (varsa); FinalProb = aynı olasılık.
+        var pWin = double.IsNaN(finalCheck.PWin) ? (double)fill.AvgPrice : finalCheck.PWin;
+        var evShare = double.IsNaN(finalCheck.EvPerShare) ? 0.0 : finalCheck.EvPerShare;
+        var tctx = new TradeContext(pWin, (double)fill.AvgPrice, evShare, freshEval?.Flow.Score ?? 0.0, freshEval?.RelPct ?? 0.0, decisionAt);
         var res = _broker.TryBuy(ctx.Market!, side, fresh, fill.Shares, limit, ask, tctx, DateTimeOffset.UtcNow);
 
         if (!res.Ok) return Abort($"emir dolmadı: {res.Reason}");
@@ -436,7 +484,7 @@ public sealed class BotService : BackgroundService
         _store.Save(_broker.Export());
         _log.LogInformation(
             "SNIPER AL #{Id} {Side} {Shares:0.##} pay @ {Avg:0.0000} (karar ask {Ask:0.000}) | maliyet {Cost:0.00} fee {Fee:0.0000} slippage {Slip:0.0000} bütçe {Budget:0.00} | zChainlink={Z:0.00} pWin={P:P1} | bakiye {Cash:0.00}",
-            t.Id, t.Side, t.Shares, t.AvgPrice, ask, t.Cost, t.Fee, t.SlippageUsd, budget, chk.Z, pWin, _broker.Cash);
+            t.Id, t.Side, t.Shares, t.AvgPrice, ask, t.Cost, t.Fee, t.SlippageUsd, budget, finalCheck.Z, pWin, _broker.Cash);
         return ctx.LastNote!;
     }
 

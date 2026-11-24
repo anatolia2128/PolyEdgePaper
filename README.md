@@ -106,7 +106,7 @@ Başa baş koşulu: kazanma oranı > ortalama giriş fiyatı + fee + slippage. B
   (bayat deftere dönülmez); dolumdan hemen önce tetik şartı (bid ≥ minbid, ask bant içinde) yeniden doğrulanır.
 - **İsteğe bağlı (varsayılan kapalı):** `Strategy:SniperRequireConfirm` (Chainlink z ≥ `SniperMinZ` ve Binance aynı yönde),
   `Strategy:SniperUseEv` (p_kazanma = min(Φ(z_chainlink), 1-`SniperTailProb`); EV/maliyet ≥ `SniperMinEv`). Bunlar HİPOTEZDİR, kanıtlanmış değildir.
-- `bash deploy/install.sh sniperv2` → doğrulama + EV + `Bot__RecordBooks=true` açık örnek (port otomatik).
+- `bash deploy/install.sh sniperv2` → aynı Sniper korumaları açık, ayrıca `Bot__RecordBooks=true` ve `BookPollMs=500` ile daha sık defter kaydı yapan örnek (port otomatik). Normal `sniper` örneğinde de `appsettings.json` varsayılanlarıyla doğrulama + EV açıktır.
 - `Bot:RecordBooks=true` → `books.csv` (ilk 5 seviye, BookPollMs aralığıyla, 100. saniyeden sonra). Bağımsız backtest:
   `python3 tools/sniper_replay.py /var/lib/polyedge/sniperv2` (A tetik / B +doğrulama / C +EV / D EV, aynı pencerelerde).
 
